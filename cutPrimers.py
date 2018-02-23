@@ -1,9 +1,14 @@
+#!/usr/bin/env python3
 # v13 - added checking of heterodimer formation of primers
 # v14 - added ability to read and write to gzipped files; speed of processing was increased 10-times
 # v15 - added ability to write untrimmed and trimmed reads to one file. Also added possibility that 3'-primer may be absent
 # v16 - added ability to trim on the 3'-end only part of primer sequence
+# fork original code from https://github.com/aakechin/cutPrimers/blob/master/cutPrimers.py
+# v17 - rewrite code to use single 5p primers input file
+#       added ability to check non-specific product as new feature
 
 # Section of importing modules
+import os
 import sys
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -17,10 +22,11 @@ import time,math
 from itertools import repeat
 from operator import itemgetter
 import hashlib
+from pprint import pprint
+import editdistance
 
 def makeHashes(seq,k):
     # k is the length of parts
-    subSeqs=[]
     h=[]
     lens=set([k])
     for i in range(len(seq)-k+1):
@@ -29,8 +35,10 @@ def makeHashes(seq,k):
 
 def initializer(maxPrimerLen2,primerLocBuf2,errNumber2,primersR1_52,primersR1_32,primersR2_52,primersR2_32,
                 primerR1_5_hashes2,primerR1_5_hashLens2,primerR2_5_hashes2,primerR2_5_hashLens2,
-                primersFileR1_32,primersFileR2_52,primersFileR2_32,readsFileR22,primersStatistics2,idimer2,primer3absent2,minPrimer3Len2):
-    global primersR1_5,primersR1_3,primersR2_5,primersR2_3,primersFileR1_3,primersFileR2_3,primersFileR2_5,readsFileR2
+                readsFileR22,primersStatistics2,idimer2,primer3absent2,minPrimer3Len2):
+#               primersFileR1_32,primersFileR2_52,primersFileR2_32,readsFileR22,primersStatistics2,idimer2,primer3absent2,minPrimer3Len2):
+    global primersR1_5,primersR1_3,primersR2_5,primersR2_3,readsFileR2
+#   global primersR1_5,primersR1_3,primersR2_5,primersR2_3,primersFileR1_3,primersFileR2_3,primersFileR2_5,readsFileR2
     global trimmedReadsR1,trimmedReadsR2,untrimmedReadsR1,untrimmedReadsR2
     global maxPrimerLen,q4,errNumber,primerLocBuf,readsPrimerNum,primersStatistics
     global primerR1_5_hashes,primerR2_5_hashes,primerR1_5_hashLens,primerR2_5_hashLens,primer3absent,idimer
@@ -43,9 +51,9 @@ def initializer(maxPrimerLen2,primerLocBuf2,errNumber2,primersR1_52,primersR1_32
     primersR2_3=primersR2_32
     primerR1_5_hashes=primerR1_5_hashes2; primerR1_5_hashLens=primerR1_5_hashLens2;
     primerR2_5_hashes=primerR2_5_hashes2; primerR2_5_hashLens=primerR2_5_hashLens2
-    primersFileR1_3=primersFileR1_32
-    primersFileR2_5=primersFileR2_52
-    primersFileR2_3=primersFileR2_32
+#   primersFileR1_3=primersFileR1_32
+#   primersFileR2_5=primersFileR2_52
+#   primersFileR2_3=primersFileR2_32
     readsFileR2=readsFileR22
     primersStatistics=primersStatistics2
     idimer=idimer2
@@ -112,6 +120,9 @@ def getErrors(s1,s2):
             muts.append(b+'/'+c)
     return(poses,muts)
 
+def interleavedPrimerNum(x):
+    return 1 - (x % 2) + int(x/2)*2
+
 def trimPrimers(data):
     # This function get two records from both read files (R1 and R2)
     # and trim them
@@ -137,6 +148,7 @@ def trimPrimers(data):
     bestPrimerValue=None
     goodPrimers=[]
     goodPrimerNums=[]
+    # loop down the best rated primers, save adjacent results as good primers
     for key,item in sorted(matchedPrimers.items(),key=itemgetter(1),reverse=True):
         if bestPrimer==None:
             bestPrimer=key
@@ -165,11 +177,12 @@ def trimPrimers(data):
     else:
         primerNum=bestPrimer
     # Find primer at the 5'-end of R2 read
-    if primersFileR2_5:
-        m3=regex.search(r'(?:'+primersR2_5[primerNum]+'){e<='+errNumber+'}',str(r2.seq[:maxPrimerLen+primerLocBuf]),flags=regex.BESTMATCH)
+    if readsFileR2:
+#   if primersFileR2_5:
+        m3=regex.search(r'(?:'+primersR2_5[primerNum+1]+'){e<='+errNumber+'}',str(r2.seq[:maxPrimerLen+primerLocBuf]),flags=regex.BESTMATCH)
         if m3==None:
             # If user wants to identify hetero- and homodimers of primers
-            if idimer:
+            if idimer or insa:
                 readHashes=set()
                 for l in primerR2_5_hashLens:
                     hashes,lens=makeHashes(str(r2.seq[:maxPrimerLen+primerLocBuf]),l)
@@ -213,55 +226,73 @@ def trimPrimers(data):
                         return([[None,None],[r1,r2]],[],False)
                 else:
                     primerNum2=bestPrimer
-                # If we found two different 
-                if primerNum!=primerNum2:
+                # If we found two different, two primer must be paired correctly
+                if primerNum+1!=primerNum2:
                     return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
             else:
                 # Save this pair of reads to untrimmed sequences
                 return([[None,None],[r1,r2]],[],False)
         else:
-            primerNum2=primerNum
+            primerNum2=primerNum+1
     # Find primer at the 3'-end of R1 read
-    if primersFileR1_3:
-        if not minPrimer3Len:
-            m2=regex.search(r'(?:'+primersR1_3[primerNum]+'){e<='+errNumber+'}',str(r1.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
-        else:
-            errNumberDescreased=int(round(int(errNumber)*minPrimer3Len/len(primersR1_3[primerNum][:-2])))
-            m2=regex.search(r'(?:'+primersR1_3[primerNum][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r1.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
-        if not primer3absent and m2==None:
-            # Save this pair of reads to untrimmed sequences
-            return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
+    # errNumber in 3p end
+    errNumberDescreased=int(int(errNumber)*minPrimer3Len/len(primersR1_3[interleavedPrimerNum(primerNum)][:-2]))
+    m2=regex.search(r'(?:'+primersR1_3[interleavedPrimerNum(primerNum)][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r1.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
+    if not primer3absent and m2==None:
+        # Save this pair of reads to untrimmed sequences
+        return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
+#   if primersFileR1_3:
+#       if not minPrimer3Len:
+#           m2=regex.search(r'(?:'+primersR1_3[primerNum]+'){e<='+errNumber+'}',str(r1.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
+#       else:
+#           errNumberDescreased=int(round(int(errNumber)*minPrimer3Len/len(primersR1_3[primerNum][:-2])))
+#           m2=regex.search(r'(?:'+primersR1_3[primerNum][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r1.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
+#       if not primer3absent and m2==None:
+#           # Save this pair of reads to untrimmed sequences
+#           return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
     # Find primer at the 3'-end of R2 read
-    if primersFileR2_3:
-        if not minPrimer3Len:
-            m4=regex.search(r'(?:'+primersR2_3[primerNum]+'){e<='+errNumber+'}',str(r2.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
-        else:
-            errNumberDescreased=int(round(int(errNumber)*minPrimer3Len/len(primersR2_3[primerNum][:-2])))
-            m4=regex.search(r'(?:'+primersR2_3[primerNum][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r2.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
+    if readsFileR2:
+        errNumberDescreased=int(round(int(errNumber)*minPrimer3Len/len(primersR2_3[primerNum][:-2])))
+        m4=regex.search(r'(?:'+primersR2_3[primerNum][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r2.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
         if not primer3absent and m4==None:
             # Save this pair of reads to untrimmed sequences
             return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
+#   if primersFileR2_3:
+#       if not minPrimer3Len:
+#           m4=regex.search(r'(?:'+primersR2_3[primerNum]+'){e<='+errNumber+'}',str(r2.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
+#       else:
+#           errNumberDescreased=int(round(int(errNumber)*minPrimer3Len/len(primersR2_3[primerNum][:-2])))
+#           m4=regex.search(r'(?:'+primersR2_3[primerNum][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r2.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
+#       if not primer3absent and m4==None:
+#           # Save this pair of reads to untrimmed sequences
+#           return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
     # If all primers were found
     # Trim sequences of primers and write them to result file
-    if primersFileR1_3 and m2!=None:
+    if m2!=None:
+#   if primersFileR1_3 and m2!=None:
         resList[0][0]=r1[m1.span()[1]:len(r1.seq)-maxPrimerLen-primerLocBuf+m2.span()[0]]
     else:
         resList[0][0]=r1[m1.span()[1]:]
     if readsFileR2:
-        if primersFileR2_3 and m4!=None:
+        if m4!=None:
+#       if primersFileR2_3 and m4!=None:
             resList[0][1]=r2[m3.span()[1]:len(r2.seq)-maxPrimerLen-primerLocBuf+m4.span()[0]]
-        elif primersFileR2_5:
+        else:
+#       elif primersFileR2_5:
             resList[0][1]=r2[m3.span()[1]:]
     # Save number of errors and primers sequences
     # [number of primer,difs1,difs2,difs3,difs4,]
     # Each dif is a set of (# of mismatches,# of insertions,# of deletions,primer_seq)
     if primersStatistics:
         difs1=countDifs(m1[0],primersR1_5[primerNum][1:-1])
-        if primersFileR1_3 and m2!=None: difs2=countDifs(m2[0],primersR1_3[primerNum][1:-1])
+        if m2!=None: difs2=countDifs(m2[0],primersR1_3[interleavedPrimerNum(primerNum)][1:-1])
+#       if primersFileR1_3 and m2!=None: difs2=countDifs(m2[0],primersR1_3[primerNum][1:-1])
         else: difs2=(0,0,0,'')
-        if primersFileR2_5: difs3=countDifs(m3[0],primersR2_5[primerNum][1:-1])
+        if readsFileR2: difs3=countDifs(m3[0],primersR2_5[primerNum2][1:-1])
+#       if primersFileR2_5: difs3=countDifs(m3[0],primersR2_5[primerNum][1:-1])
         else: difs3=(0,0,0,'')
-        if primersFileR2_3 and m4!=None: difs4=countDifs(m4[0],primersR2_3[primerNum][1:-1])
+        if readsFileR2 and m4!=None: difs4=countDifs(m4[0],primersR2_3[primerNum][1:-1])
+#       if primersFileR2_3 and m4!=None: difs4=countDifs(m4[0],primersR2_3[primerNum][1:-1])
         else: difs4=(0,0,0,'')
         return (resList,[primerNum,difs1,difs2,difs3,difs4],False)
     else:
@@ -272,44 +303,50 @@ if __name__ == "__main__":
     par=argparse.ArgumentParser(description='This script cuts primers from reads sequences')
     par.add_argument('--readsFile_r1','-r1',dest='readsFile1',type=str,help='file with R1 reads of one sample',required=True)
     par.add_argument('--readsFile_r2','-r2',dest='readsFile2',type=str,help='file with R2 reads of one sample',required=False)
-    par.add_argument('--primersFileR1_5','-pr15',dest='primersFileR1_5',type=str,help='fasta-file with sequences of primers on the 5\'-end of R1 reads',required=True)
-    par.add_argument('--primersFileR2_5','-pr25',dest='primersFileR2_5',type=str,help='fasta-file with sequences of primers on the 5\'-end of R2 reads. Do not use this parameter if you have single-end reads',required=False)
-    par.add_argument('--primersFileR1_3','-pr13',dest='primersFileR1_3',type=str,help='fasta-file with sequences of primers on the 3\'-end of R1 reads. It is not required. But if it is determined, -pr23 is necessary',required=False)
-    par.add_argument('--primersFileR2_3','-pr23',dest='primersFileR2_3',type=str,help='fasta-file with sequences of primers on the 3\'-end of R2 reads',required=False)
+    par.add_argument('--primersFile','-pr',dest='primersFile',type=str,help='fasta-file with sequences of primers on the 5\'(forward)-ends of R1 and R2 reads, paired primers should be written interleaved as >forward_primer_1 >reverse_primer_1 >forward_primer_2 >reverse_primer_2',required=True)
+#   par.add_argument('--primersFileR1_5','-pr15',dest='primersFileR1_5',type=str,help='fasta-file with sequences of primers on the 5\'-end of R1 reads',required=True)
+#   par.add_argument('--primersFileR2_5','-pr25',dest='primersFileR2_5',type=str,help='fasta-file with sequences of primers on the 5\'-end of R2 reads. Do not use this parameter if you have single-end reads',required=False)
+#   par.add_argument('--primersFileR1_3','-pr13',dest='primersFileR1_3',type=str,help='fasta-file with sequences of primers on the 3\'-end of R1 reads. It is not required. But if it is determined, -pr23 is necessary',required=False)
+#   par.add_argument('--primersFileR2_3','-pr23',dest='primersFileR2_3',type=str,help='fasta-file with sequences of primers on the 3\'-end of R2 reads',required=False)
     par.add_argument('--trimmedReadsR1','-tr1',dest='trimmedReadsR1',type=str,help='name of file for trimmed R1 reads',required=True)
     par.add_argument('--trimmedReadsR2','-tr2',dest='trimmedReadsR2',type=str,help='name of file for trimmed R2 reads',required=False)
     par.add_argument('--untrimmedReadsR1','-utr1',dest='untrimmedReadsR1',type=str,help='name of file for untrimmed R1 reads. If you want to write reads that has not been trimmed to the same file as trimmed reads, type the same name',required=True)
     par.add_argument('--untrimmedReadsR2','-utr2',dest='untrimmedReadsR2',type=str,help='name of file for untrimmed R2 reads. If you want to write reads that has not been trimmed to the same file as trimmed reads, type the same name',required=False)
     par.add_argument('--primersStatistics','-stat',dest='primersStatistics',type=str,help='name of file for statistics of errors in primers. This works only for paired-end reads with primers at 3\'- and 5\'-ends',required=False)
     par.add_argument('--error-number','-err',dest='errNumber',type=int,help='number of errors (substitutions, insertions, deletions) that allowed during searching primer sequence in a read sequence. Default: 5',default=5)
+#   par.add_argument('--min-fragment-length','-minlen',dest='minlen',type=int,help='minimal fragment length. Default: 60',default=60)
     par.add_argument('--primer-location-buffer','-plb',dest='primerLocBuf',type=int,help='Buffer of primer location in the read from the end. Default: 10',default=10)
-    par.add_argument('--min-primer3-length','-primer3len',dest='minPrimer3Len',type=int,help="Minimal length of primer on the 3'-end to trim. Use this parameter, if you are ready to trim only part of primer sequence of the 3'-end of read")
+    par.add_argument('--min-primer3-length','-primer3len',dest='minPrimer3Len',type=int,help="Minimal length of primer on the 3'-end to trim. Use this parameter, if you are ready to trim only part of primer sequence of the 3'-end of read",default=6)
     par.add_argument('--primer3-absent','-primer3',dest='primer3absent',action='store_true',help="if primer at the 3'-end may be absent, use this parameter")
     par.add_argument('--identify-dimers','-idimer',dest='idimer',type=str,help='use this parameter if you want to get statistics of homo- and heterodimer formation. Choose file to which statistics of primer-dimers will be written. This parameter may slightly decrease the speed of analysis')
+    par.add_argument('--identify-nsa','-insa',dest='insa',type=str,help='use this parameter if you want to get statistics of primers non-specific amplification products. Choose file to which statistics will be written. This parameter may slightly decrease the speed of analysis')
     par.add_argument('--threads','-t',dest='threads',type=int,help='number of threads',default=2)
     args=par.parse_args()
     print('The command was:\n',' '.join(sys.argv))
     readsFileR1=args.readsFile1
     readsFileR2=args.readsFile2
-    primersFileR1_5=args.primersFileR1_5
-    primersFileR2_5=args.primersFileR2_5
-    primersFileR1_3=args.primersFileR1_3
-    primersFileR2_3=args.primersFileR2_3
+    primersFile=args.primersFile
+#   primersFileR1_5=args.primersFileR1_5
+#   primersFileR2_5=args.primersFileR2_5
+#   primersFileR1_3=args.primersFileR1_3
+#   primersFileR2_3=args.primersFileR2_3
     primer3absent=args.primer3absent
     minPrimer3Len=args.minPrimer3Len
     errNumber=str(args.errNumber)
     primerLocBuf=args.primerLocBuf
     primersStatistics=args.primersStatistics
     idimer=args.idimer
-    if (primersFileR1_3 and not primersFileR1_5) or (not primersFileR2_5 and primersFileR2_3):
-        print('ERROR: use of -pr13 or -pr23 should be accompanied by use of second one parameter for 5\'-end')
-        exit(0)
-    if (not readsFileR2 and primersFileR2_5) or (not readsFileR2 and primersFileR2_3):
-        print('ERROR: use of -pr23 or -pr25 should be accompanied by use of readsFile2 parameter')
-        exit(0)
-    if readsFileR2 and not primersFileR2_5:
-        print('ERROR: use of -r2 parameter should be accompanied by use of at least -pr25 parameter')
-        exit(0)
+    insa=args.insa
+#   minlen=args.minlen
+#   if (primersFileR1_3 and not primersFileR1_5) or (not primersFileR2_5 and primersFileR2_3):
+#       print('ERROR: use of -pr13 or -pr23 should be accompanied by use of second one parameter for 5\'-end')
+#       exit(0)
+#   if (not readsFileR2 and primersFileR2_5) or (not readsFileR2 and primersFileR2_3):
+#       print('ERROR: use of -pr23 or -pr25 should be accompanied by use of readsFile2 parameter')
+#       exit(0)
+#   if readsFileR2 and not primersFileR2_5:
+#       print('ERROR: use of -r2 parameter should be accompanied by use of at least -pr25 parameter')
+#       exit(0)
     try:
         if args.trimmedReadsR1[-3:]!='.gz':
             trimmedReadsR1=open(args.trimmedReadsR1,'w')
@@ -358,9 +395,11 @@ if __name__ == "__main__":
                 print('ERROR! Could not create file:',args.untrimmedReadsR2)
                 print('########')
                 exit(0)
-    if idimer and not readsFileR2:
-        print('Warning! You did not provide R2-file so parameter "-idimer" will be ignored')
+    if (idimer or insa) and not readsFileR2:
+#   if idimer and not readsFileR2:
+        print('Warning! You did not provide R2-file so parameter "-idimer/insa" will be ignored')
         idimer=None
+        insa=None
     if idimer:
         try:
             idimerFile=open(idimer,'w')
@@ -370,6 +409,15 @@ if __name__ == "__main__":
             print('########')
             exit(0)
         primerDimers={}
+    if insa:
+        try:
+            insaFile=open(insa,'w')
+        except FileNotFoundError:
+            print('########')
+            print('ERROR! Could not create file:',insa)
+            print('########')
+            exit(0)
+        primerNSAs={}
     if primersStatistics:
         primersStatistics=open(args.primersStatistics,'w')
         primersStatisticsPos=open(args.primersStatistics[:-4]+'_poses.tab','w')
@@ -386,11 +434,12 @@ if __name__ == "__main__":
     primersR1_5_names=[]
     primerR1_5_hashes={}
     primerR1_5_hashLens=set()
-    primerR2_5_hashes={}
-    primerR2_5_hashLens=set()
+#   primerR2_5_hashes={}
+#   primerR2_5_hashLens=set()
     i=0
     try:
-        for r in SeqIO.parse(primersFileR1_5,'fasta'):
+        for r in SeqIO.parse(primersFile,'fasta'):
+#       for r in SeqIO.parse(primersFileR1_5,'fasta'):
             primersR1_5_names.append(r.name)
             primersR1_5.append('('+str(r.seq)+')')
             partLens=math.floor(len(r.seq)/(int(errNumber)+1))
@@ -406,70 +455,91 @@ if __name__ == "__main__":
             i+=1
     except FileNotFoundError:
         print('########')
-        print('ERROR! File not found:',primersFileR1_5)
+        print('ERROR! File not found:',primersFile)
+#       print('ERROR! File not found:',primersFileR1_5)
         print('########')
         exit(0)
+    # chech edit distance between each primer, warn is distance is less than -err setting
+    i=1
+    for s in primersR1_5[:-1]:
+        for t in primersR1_5[i:]:
+            if editdistance.eval(s, t) <= int(errNumber):
+                print('########')
+                print('ERROR! similar primers might cause confusion: ', s, '/', t)
+                print('########')
+                exit(0)
+        i+=1
     # primers in R2 on the 5'-end
-    if primersFileR2_5:
-        primersR2_5=[]
-        primersR2_5_names=[]
-        i=0
-        try:
-            for r in SeqIO.parse(primersFileR2_5,'fasta'):
-                primersR2_5_names.append(r.name)
-                primersR2_5.append('('+str(r.seq)+')')
-                partLens=math.floor(len(r.seq)/(int(errNumber)+1))
-                hashes,lens=makeHashes(str(r.seq),partLens)
-                primerR2_5_hashLens.update(lens)
-                for h in hashes:
-                    if h in primerR2_5_hashes.keys():
-                        primerR2_5_hashes[h].append(i)
-                    else:
-                        primerR2_5_hashes[h]=[i]
-                if len(r.seq)>maxPrimerLen:
-                    maxPrimerLen=len(r.seq)
-                i+=1
-        except FileNotFoundError:
-            print('########')
-            print('ERROR! File not found:',primersFileR2_5)
-            print('########')
-            exit(0)
+    if readsFileR2:
+        primersR2_5=primersR1_5
+        primersR2_5_names=primersR1_5_names
+        primerR2_5_hashes=primerR1_5_hashes
+        primerR2_5_hashLens=primerR1_5_hashLens
+#   if primersFileR2_5:
+#       primersR2_5=[]
+#       primersR2_5_names=[]
+#       i=0
+#       try:
+#           for r in SeqIO.parse(primersFileR2_5,'fasta'):
+#               primersR2_5_names.append(r.name)
+#               primersR2_5.append('('+str(r.seq)+')')
+#               partLens=math.floor(len(r.seq)/(int(errNumber)+1))
+#               hashes,lens=makeHashes(str(r.seq),partLens)
+#               primerR2_5_hashLens.update(lens)
+#               for h in hashes:
+#                   if h in primerR2_5_hashes.keys():
+#                       primerR2_5_hashes[h].append(i)
+#                   else:
+#                       primerR2_5_hashes[h]=[i]
+#               if len(r.seq)>maxPrimerLen:
+#                   maxPrimerLen=len(r.seq)
+#               i+=1
+#       except FileNotFoundError:
+#           print('########')
+#           print('ERROR! File not found:',primersFileR2_5)
+#           print('########')
+#           exit(0)
     else:
         primersR2_5=None
     # primers in R1 on the 3'-end
-    if primersFileR1_3:
-        primersR1_3=[]
-        primersR1_3_names=[]
-        try:
-            for r in SeqIO.parse(primersFileR1_3,'fasta'):
-                primersR1_3_names.append(r.name)
-                primersR1_3.append('('+str(r.seq)+')')
-                if len(r.seq)>maxPrimerLen:
-                    maxPrimerLen=len(r.seq)
-        except FileNotFoundError:
-            print('########')
-            print('ERROR! File not found:',primersFileR1_3)
-            print('########')
-            exit(0)
-    else:
-        primersR1_3=None
+    primersR1_3_names=[s + '_rc' for s in primersR1_5_names]
+    primersR1_3=['('+revComplement(s[1:-1])+')' for s in primersR1_5]
+#   if primersFileR1_3:
+#       primersR1_3=[]
+#       primersR1_3_names=[]
+#       try:
+#           for r in SeqIO.parse(primersFileR1_3,'fasta'):
+#               primersR1_3_names.append(r.name)
+#               primersR1_3.append('('+str(r.seq)+')')
+#               if len(r.seq)>maxPrimerLen:
+#                   maxPrimerLen=len(r.seq)
+#       except FileNotFoundError:
+#           print('########')
+#           print('ERROR! File not found:',primersFileR1_3)
+#           print('########')
+#           exit(0)
+#   else:
+#       primersR1_3=None
     # primers in R2 on the 3'-end
-    if primersFileR2_3:
-        primersR2_3=[]
-        primersR2_3_names=[]
-        try:
-            for r in SeqIO.parse(primersFileR2_3,'fasta'):
-                primersR2_3_names.append(r.name)
-                primersR2_3.append('('+str(r.seq)+')')
-                if len(r.seq)>maxPrimerLen:
-                    maxPrimerLen=len(r.seq)
-        except FileNotFoundError:
-            print('########')
-            print('ERROR! File not found:',primersFileR2_3)
-            print('########')
-            exit(0)
-    else:
-        primersR2_3=None
+    if readsFileR2:
+        primersR2_3=primersR1_3
+        primersR2_3_names=primersR1_3_names
+#   if primersFileR2_3:
+#       primersR2_3=[]
+#       primersR2_3_names=[]
+#       try:
+#           for r in SeqIO.parse(primersFileR2_3,'fasta'):
+#               primersR2_3_names.append(r.name)
+#               primersR2_3.append('('+str(r.seq)+')')
+#               if len(r.seq)>maxPrimerLen:
+#                   maxPrimerLen=len(r.seq)
+#       except FileNotFoundError:
+#           print('########')
+#           print('ERROR! File not found:',primersFileR2_3)
+#           print('########')
+#           exit(0)
+#   else:
+#       primersR2_3=None
     # Read file with R1 and R2 reads
     try:
         if readsFileR1[-3:]!='.gz':
@@ -503,15 +573,17 @@ if __name__ == "__main__":
     primerErrorQ=[] 
     p=Pool(threads,initializer,(maxPrimerLen,primerLocBuf,errNumber,primersR1_5,primersR1_3,primersR2_5,primersR2_3,
                                 primerR1_5_hashes,primerR1_5_hashLens,primerR2_5_hashes,primerR2_5_hashLens,
-                                primersFileR1_3,primersFileR2_5,primersFileR2_3,readsFileR2,primersStatistics,idimer,primer3absent,minPrimer3Len))
+                                readsFileR2,primersStatistics,idimer,primer3absent,minPrimer3Len))
+#                               primersFileR1_3,primersFileR2_5,primersFileR2_3,readsFileR2,primersStatistics,idimer,primer3absent,minPrimer3Len))
     # Cutting primers and writing result immediately
     print('Trimming primers from reads...')
     doneWork=0
     showPercWork(0,allWork)
     for res in p.imap_unordered(trimPrimers,zip(data1,data2),10):
         doneWork+=1
-        showPercWork(doneWork,allWork)
-        if res[1]!=[]:
+        if doneWork & 100 == 0:
+            showPercWork(doneWork,allWork)
+        if primersStatistics and res[1]!=[]:
             primerErrorQ.append(res[1])
         if readsFileR2:
             if res[0][0][0] is not None and res[0][0][1] is not None:
@@ -520,22 +592,31 @@ if __name__ == "__main__":
             elif res[0][1][0] is not None and res[0][1][1] is not None:
                 # If user want to identify primer-dimers
                 if idimer and res[2]:
-                    r1partSeq=str(res[0][1][0].seq[:40])
-                    r2partSeq=revComplement(str(res[0][1][1].seq[:40]))
+                    r1partSeq=str(res[0][1][0].seq[:52])
+                    r2partSeq=revComplement(str(res[0][1][1].seq[:52]))
+#                   r1partSeq=str(res[0][1][0].seq[:52])
+#                   r2partSeq=revComplement(str(res[0][1][1].seq[:52]))
                     difs=countDifs(r1partSeq,r2partSeq)
                     if sum(difs[0:2])<=int(errNumber):
+                        # it is a primer-dimer
                         # and len(difs[3])>=len(primersR1_5[res[2][0]])
                         if primersR1_5_names[res[2][0]]+' & '+primersR2_5_names[res[2][1]] not in primerDimers.keys():
                             primerDimers[primersR1_5_names[res[2][0]]+' & '+primersR2_5_names[res[2][1]]]=1
                         else:
                             primerDimers[primersR1_5_names[res[2][0]]+' & '+primersR2_5_names[res[2][1]]]+=1
+                if insa and res[2] and len(res[0][1][0].seq) > 52:
+                    if primersR1_5_names[res[2][0]]+' & '+primersR2_5_names[res[2][1]] not in primerNSAs.keys():
+                        primerNSAs[primersR1_5_names[res[2][0]]+' & '+primersR2_5_names[res[2][1]]]=1
                     else:
-                        SeqIO.write(res[0][1][0],untrimmedReadsR1,'fastq')
-                        SeqIO.write(res[0][1][1],untrimmedReadsR2,'fastq')
-                else:
-                    SeqIO.write(res[0][1][0],untrimmedReadsR1,'fastq')
-                    SeqIO.write(res[0][1][1],untrimmedReadsR2,'fastq')
-                        
+                        primerNSAs[primersR1_5_names[res[2][0]]+' & '+primersR2_5_names[res[2][1]]]+=1
+                SeqIO.write(res[0][1][0],untrimmedReadsR1,'fastq')
+                SeqIO.write(res[0][1][1],untrimmedReadsR2,'fastq')
+#                   else:
+#                       SeqIO.write(res[0][1][0],untrimmedReadsR1,'fastq')
+#                       SeqIO.write(res[0][1][1],untrimmedReadsR2,'fastq')
+#               else:
+#                   SeqIO.write(res[0][1][0],untrimmedReadsR1,'fastq')
+#                   SeqIO.write(res[0][1][1],untrimmedReadsR2,'fastq')
             else:
                 print('ERROR: nor the 1st item of function result list or 2nd contains anything')
                 print(res)
@@ -576,17 +657,22 @@ if __name__ == "__main__":
 ## R2 5'---------________________________---------3'
 ##          F                           R_reverse_complement
                 
+            # NOTICE: F is R2 5p primer
             # Increase number of read pairs
             primersErrors[item[0]][0][0]+=1
             primersErrors[item[0]][1][0]+=1
             # F-primers of pairs
             # The last variant is a case when we have single-end reads and 3' does not contain primer sequence
-            if ((not primersFileR1_3 and primersFileR2_5 and item[3][0:3]==(0,0,0)) or
-                (primersFileR1_3 and primersFileR2_5 and item[3][0:3]==(0,0,0) and item[2][0:3]==(0,0,0)) or
-                (primersFileR1_5 and not primersFileR2_5 and not primersFileR1_3 and not primersFileR2_3)):
+            # add to number of read pairs without errors
+            if readsFileR2 and item[3][0:3]==(0,0,0):
                 primersErrors[item[0]][0][1]+=1
+#           if ((not primersFileR1_3 and primersFileR2_5 and item[3][0:3]==(0,0,0)) or
+#               (primersFileR1_3 and primersFileR2_5 and item[3][0:3]==(0,0,0) and item[2][0:3]==(0,0,0)) or
+#               (primersFileR1_5 and not primersFileR2_5 and not primersFileR1_3 and not primersFileR2_3)):
+#               primersErrors[item[0]][0][1]+=1
             # If it was overlapping paired-end reads, we try to check if this is sequencing error
-            elif primersFileR1_3 and primersFileR2_5 and primersFileR2_3 and item[2][3]!='' and item[3][3]!='':
+            elif item[2][3]!='' and item[3][3]!='':
+#           elif primersFileR1_3 and primersFileR2_5 and primersFileR2_3 and item[2][3]!='' and item[3][3]!='':
                 # Rererse complement one of primer sequences
                 rev=str(Seq(item[2][3]).reverse_complement())
                 a=pairwise2.align.globalms(rev,item[3][3],2,-1,-1.53,-0.1)
@@ -613,11 +699,14 @@ if __name__ == "__main__":
                 primersErrors[item[0]][0][2]+=1
             # R-primers of pairs
             # For R-primer we always have sequence at least at 5' end of R1
-            if ((not primersFileR2_3 and item[1][0:3]==(0,0,0)) or
-                (primersFileR2_3 and item[1][0:3]==(0,0,0) and item[4][0:3]==(0,0,0))):
+            if item[1][0:3]==(0,0,0):
                 primersErrors[item[0]][1][1]+=1
+#           if ((not primersFileR2_3 and item[1][0:3]==(0,0,0)) or
+#               (primersFileR2_3 and item[1][0:3]==(0,0,0) and item[4][0:3]==(0,0,0))):
+#               primersErrors[item[0]][1][1]+=1
             # If it was overlapping paired-end reads, we try to check if this is sequencing error
-            elif primersFileR1_3 and primersFileR2_5 and primersFileR2_3 and item[4][3]!='' and item[1][3]!='':
+            elif item[4][3]!='' and item[1][3]!='':
+#           elif primersFileR1_3 and primersFileR2_5 and primersFileR2_3 and item[4][3]!='' and item[1][3]!='':
                 # Rererse complement one of primer sequences
                 rev=str(Seq(item[4][3]).reverse_complement())
                 a=pairwise2.align.globalms(rev,item[1][3],2,-1,-1.53,-0.1)
@@ -652,8 +741,12 @@ if __name__ == "__main__":
         for key,item in primersErrors.items():
             item[0]=list(map(str,item[0]))
             item[1]=list(map(str,item[1]))
-            primersStatistics.write(str(key+1)+'F\t'+'\t'.join(item[0])+'\n')
-            primersStatistics.write(str(key+1)+'R\t'+'\t'.join(item[1])+'\n')
+            # R1 5p
+            primersStatistics.write(primersR1_5_names[key]+'\t'+'\t'.join(item[1])+'\n')
+            # R2 5p
+            primersStatistics.write(primersR1_5_names[key+1]+'\t'+'\t'.join(item[0])+'\n')
+#           primersStatistics.write(str(key+1)+'F\t'+'\t'.join(item[0])+'\n')
+#           primersStatistics.write(str(key+1)+'R\t'+'\t'.join(item[1])+'\n')
         primersStatistics.close()
 
         primersStatisticsPos.write('Position_in_primer\tNumber_of_mutations\n')
@@ -670,6 +763,11 @@ if __name__ == "__main__":
         for key,item in sorted(primerDimers.items(),key=itemgetter(1),reverse=True):
             idimerFile.write(key+'\t'+str(item)+'\n')
         idimerFile.close()
+    if insa:
+        insaFile.write('NSA-pair\tNumber of read pairs\n')
+        for key,item in sorted(primerNSAs.items(),key=itemgetter(1),reverse=True):
+            insaFile.write(key+'\t'+str(item)+'\n')
+        insaFile.close()
 
     trimmedReadsR1.close()
     untrimmedReadsR1.close()
@@ -678,6 +776,3 @@ if __name__ == "__main__":
         untrimmedReadsR2.close()
 
 
-
-
-        

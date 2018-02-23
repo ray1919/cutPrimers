@@ -1,5 +1,6 @@
 # cutPrimers
 curPrimers is a tool for trimming primer sequences from amplicon based NGS reads
+This is a fork from the original git
 
 ## Requirements
 ### Linux
