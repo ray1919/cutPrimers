@@ -114,11 +114,14 @@ python3 cutPrimers.py -r1 example_trimmed/trimmed_R1.fq.gz \
                         parameter may slightly decrease the speed of analysis
   --identify-nsa INSA, -insa INSA
                         use this parameter if you want to get statistics of
-                        primers non-specific amplification products. Choose
+                        primers non-specific amplification products[1]. Choose
                         file to which statistics will be written. This
                         parameter may slightly decrease the speed of analysis
   --threads THREADS, -t THREADS
                         number of threads
 ```
+
+[1] non-specific amplification here means read pairs with incorrect combination of primers or right combination of primer but insert size less than 35bp.
+
 ## Citation
 **cutPrimers: A New Tool for Accurate Cutting of Primers from Reads of Targeted Next Generation Sequencing**. Kechin A, Boyarskikh U, Kel A, Filipenko M, 2017, Journal of Computational Biology, 2017 Jul 17. doi: 10.1089/cmb.2017.0096 (https://www.ncbi.nlm.nih.gov/pubmed/28715235)
