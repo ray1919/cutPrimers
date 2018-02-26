@@ -7,6 +7,7 @@
 # v17 - rewrite code to use single 5p primers input file
 #       added ability to check non-specific product as new feature
 #       added ability to check similar primers which edit distance less than min-errors
+# v18 - discard reads length < 35 after primer-trimming
 
 # Section of importing modules
 import os
@@ -253,6 +254,9 @@ def trimPrimers(data):
             resList[0][1]=r2[m3.span()[1]:len(r2.seq)-maxPrimerLen-primerLocBuf+m4.span()[0]]
         else:
             resList[0][1]=r2[m3.span()[1]:]
+    # discard reads length < 35 after primer-trimming
+    if len(resList[0][0].seq) < 35 or len(resList[0][1].seq) < 35:
+        return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
     # Save number of errors and primers sequences
     # [number of primer,difs1,difs2,difs3,difs4,]
     # Each dif is a set of (# of mismatches,# of insertions,# of deletions,primer_seq)
