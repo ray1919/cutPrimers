@@ -8,6 +8,8 @@
 #       added ability to check non-specific product as new feature
 #       added ability to check similar primers which edit distance less than min-errors
 # v18 - discard reads length < 35 after primer-trimming
+# v19 - added ability to label each record with 5p primer name at the end of each fastq description
+#     - fix bug that some dimers might be also detected as non-specfic amplicons
 
 # Section of importing modules
 import os
@@ -127,6 +129,9 @@ def trimPrimers(data):
     # resList is a variable with trimmed read sequences (0) and untrimmed read sequences (1)
     resList=[[None,None],[None,None]]
     r1,r2=data
+    # skip short reads less than 30bp
+#   if len(r1) < maxPrimerLen+primerLocBuf or len(r2) < maxPrimerLen+primerLocBuf:
+#       return([[None,None],[r1,r2]],[],False)
     # Find primer at the 5'-end of R1 read
     readHashes=set()
     for l in primerR1_5_hashLens:
@@ -174,7 +179,10 @@ def trimPrimers(data):
         primerNum=bestPrimer
     # Find primer at the 5'-end of R2 read
     if readsFileR2:
-        m3=regex.search(r'(?:'+primersR2_5[primerNum+1]+'){e<='+errNumber+'}',str(r2.seq[:maxPrimerLen+primerLocBuf]),flags=regex.BESTMATCH)
+        if primerNum == len(primersR2_5) - 1:
+            m3=None
+        else:
+            m3=regex.search(r'(?:'+primersR2_5[primerNum+1]+'){e<='+errNumber+'}',str(r2.seq[:maxPrimerLen+primerLocBuf]),flags=regex.BESTMATCH)
         if m3==None:
             # If user wants to identify hetero- and homodimers of primers
             if idimer or insa:
@@ -249,11 +257,13 @@ def trimPrimers(data):
         resList[0][0]=r1[m1.span()[1]:len(r1.seq)-maxPrimerLen-primerLocBuf+m2.span()[0]]
     else:
         resList[0][0]=r1[m1.span()[1]:]
+    resList[0][0].description += " " + primersR1_5_names[primerNum]
     if readsFileR2:
         if m4!=None:
             resList[0][1]=r2[m3.span()[1]:len(r2.seq)-maxPrimerLen-primerLocBuf+m4.span()[0]]
         else:
             resList[0][1]=r2[m3.span()[1]:]
+        resList[0][1].description += " " + primersR2_5_names[primerNum2]
     # discard reads length < 35 after primer-trimming
     if len(resList[0][0].seq) < 35 or len(resList[0][1].seq) < 35:
         return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
@@ -485,9 +495,10 @@ if __name__ == "__main__":
                 SeqIO.write(res[0][0][1],trimmedReadsR2,'fastq')
             elif res[0][1][0] is not None and res[0][1][1] is not None:
                 # If user want to identify primer-dimers
-                if idimer and res[2]:
-                    r1partSeq=str(res[0][1][0].seq[:52])
-                    r2partSeq=revComplement(str(res[0][1][1].seq[:52]))
+                maxDimerLen=maxPrimerLen*2
+                if idimer and res[2] and len(res[0][1][0].seq) < maxDimerLen and len(res[0][1][1].seq) < maxDimerLen:
+                    r1partSeq=str(res[0][1][0].seq)
+                    r2partSeq=revComplement(str(res[0][1][1].seq))
                     difs=countDifs(r1partSeq,r2partSeq)
                     if sum(difs[0:2])<=int(errNumber):
                         # it is a primer-dimer
@@ -496,7 +507,7 @@ if __name__ == "__main__":
                             primerDimers[primersR1_5_names[res[2][0]]+' & '+primersR2_5_names[res[2][1]]]=1
                         else:
                             primerDimers[primersR1_5_names[res[2][0]]+' & '+primersR2_5_names[res[2][1]]]+=1
-                if insa and res[2] and len(res[0][1][0].seq) > 52:
+                if insa and res[2] and (len(res[0][1][0].seq) >= maxDimerLen or len(res[0][1][1].seq) >= maxDimerLen):
                     if primersR1_5_names[res[2][0]]+' & '+primersR2_5_names[res[2][1]] not in primerNSAs.keys():
                         primerNSAs[primersR1_5_names[res[2][0]]+' & '+primersR2_5_names[res[2][1]]]=1
                     else:
