@@ -10,6 +10,7 @@
 # v18 - discard reads length < 35 after primer-trimming
 # v19 - added ability to label each record with 5p primer name at the end of each fastq description
 #     - fix bug that some dimers might be also detected as non-specfic amplicons
+# v20 - added ability to cutprimer with reverse strand pairs of primers, F/5p primer in reverse strand, and R/3p primer in forward primer
 
 # Section of importing modules
 import os
@@ -179,10 +180,11 @@ def trimPrimers(data):
         primerNum=bestPrimer
     # Find primer at the 5'-end of R2 read
     if readsFileR2:
-        if primerNum == len(primersR2_5) - 1:
-            m3=None
+        if primerNum % 2 == 0:
+            primerPairNum = primerNum + 1
         else:
-            m3=regex.search(r'(?:'+primersR2_5[primerNum+1]+'){e<='+errNumber+'}',str(r2.seq[:maxPrimerLen+primerLocBuf]),flags=regex.BESTMATCH)
+            primerPairNum = primerNum - 1
+        m3=regex.search(r'(?:'+primersR2_5[primerPairNum]+'){e<='+errNumber+'}',str(r2.seq[:maxPrimerLen+primerLocBuf]),flags=regex.BESTMATCH)
         if m3==None:
             # If user wants to identify hetero- and homodimers of primers
             if idimer or insa:
@@ -230,13 +232,13 @@ def trimPrimers(data):
                 else:
                     primerNum2=bestPrimer
                 # If we found two different, two primer must be paired correctly
-                if primerNum+1!=primerNum2:
+                if abs(primerNum - primerNum2) != 1 or max(primerNum, primerNum2) % 2 == 0:
                     return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
             else:
                 # Save this pair of reads to untrimmed sequences
                 return([[None,None],[r1,r2]],[],False)
         else:
-            primerNum2=primerNum+1
+            primerNum2=primerPairNum
     # Find primer at the 3'-end of R1 read
     # errNumber in 3p end
     errNumberDescreased=int(int(errNumber)*minPrimer3Len/len(primersR1_3[interleavedPrimerNum(primerNum)][:-2]))
