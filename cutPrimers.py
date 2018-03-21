@@ -634,7 +634,11 @@ if __name__ == "__main__":
             # R1 5p
             primersStatistics.write(primersR1_5_names[key]+'\t'+'\t'.join(item[1])+'\n')
             # R2 5p
-            primersStatistics.write(primersR1_5_names[key+1]+'\t'+'\t'.join(item[0])+'\n')
+            if key % 2 == 0:
+                key2 = key + 1
+            else:
+                key2 = key - 1
+            primersStatistics.write(primersR1_5_names[key2]+'\t'+'\t'.join(item[0])+'\n')
         primersStatistics.close()
 
         primersStatisticsPos.write('Position_in_primer\tNumber_of_mutations\n')
