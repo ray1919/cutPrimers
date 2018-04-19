@@ -405,9 +405,9 @@ if __name__ == "__main__":
     try:
         for r in SeqIO.parse(primersFile,'fasta'):
             primersR1_5_names.append(r.name)
-            primersR1_5.append('('+str(r.seq)+')')
+            primersR1_5.append('('+str(r.seq).upper()+')')
             partLens=math.floor(len(r.seq)/(int(errNumber)+1))
-            hashes,lens=makeHashes(str(r.seq),partLens)
+            hashes,lens=makeHashes(str(r.seq).upper(),partLens)
             primerR1_5_hashLens.update(lens)
             for h in hashes:
                 if h in primerR1_5_hashes.keys():
