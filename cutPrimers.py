@@ -29,6 +29,8 @@ from operator import itemgetter
 import hashlib
 import editdistance
 
+__version__ = '1.20.6'
+
 def makeHashes(seq,k):
     # k is the length of parts
     h=[]
@@ -302,7 +304,7 @@ if __name__ == "__main__":
     par.add_argument('--identify-dimers','-idimer',dest='idimer',type=str,help='use this parameter if you want to get statistics of homo- and heterodimer formation. Choose file to which statistics of primer-dimers will be written. This parameter may slightly decrease the speed of analysis')
     par.add_argument('--identify-nsa','-insa',dest='insa',type=str,help='use this parameter if you want to get statistics of primers non-specific amplification products. Choose file to which statistics will be written. This parameter may slightly decrease the speed of analysis')
     par.add_argument('--threads','-t',dest='threads',type=int,help='number of threads',default=2)
-    par.add_argument('--version','-v',dest='version',action='version',help='print version information',version="cutPrimers version 20, https://github.com/ray1919/cutPrimers")
+    par.add_argument('--version','-v',action='version',help='print version information',version="cutPrimers version " + __version__ +", https://github.com/ray1919/cutPrimers")
     args=par.parse_args()
     print('The command was:\n',' '.join(sys.argv))
     readsFileR1=args.readsFile1
@@ -315,9 +317,6 @@ if __name__ == "__main__":
     primersStatistics=args.primersStatistics
     idimer=args.idimer
     insa=args.insa
-    if args.version:
-        print(args.version)
-        exit(0)
     try:
         if args.trimmedReadsR1[-3:]!='.gz':
             trimmedReadsR1=open(args.trimmedReadsR1,'w')
