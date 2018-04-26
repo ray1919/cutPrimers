@@ -29,7 +29,7 @@ from operator import itemgetter
 import hashlib
 import editdistance
 
-__version__ = '1.20.6'
+__version__ = '1.20.8'
 
 def makeHashes(seq,k):
     # k is the length of parts
@@ -429,11 +429,13 @@ if __name__ == "__main__":
     i=1
     for s in primersR1_5[:-1]:
         for t in primersR1_5[i:]:
-            if editdistance.eval(s, t) <= int(errNumber):
+            newed=editdistance.eval(s, t)
+            if newed <= int(errNumber):
                 print('########')
-                print('ERROR! similar primers might cause confusion: ', s, '/', t)
+                print('WARN! similar primers might cause confusion: ', s, '/', t)
+                print('--error-number was set to ', newed - 1 )
                 print('########')
-                exit(0)
+                errNumber=str(newed - 1)
         i+=1
     # primers in R2 on the 5'-end
     if readsFileR2:
