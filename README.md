@@ -117,6 +117,8 @@ python3 cutPrimers.py -r1 example_trimmed/trimmed_R1.fq.gz \
                         primers non-specific amplification products[1]. Choose
                         file to which statistics will be written. This
                         parameter may slightly decrease the speed of analysis
+  --nsa-reserve, -rnsa  if want to reserve non-specific amplcons, use this
+                        parameter
   --threads THREADS, -t THREADS
                         number of threads
 ```
