@@ -7,10 +7,11 @@
 # v17 - rewrite code to use single 5p primers input file
 #       added ability to check non-specific product as new feature
 #       added ability to check similar primers which edit distance less than min-errors
-# v18 - discard reads length < 35 after primer-trimming
+# v18 - discard reads length < 20 after primer-trimming
 # v19 - added ability to label each record with 5p primer name at the end of each fastq description
 #     - fix bug that some dimers might be also detected as non-specfic amplicons
 # v20 - added ability to cutprimer with reverse strand pairs of primers, F/5p primer in reverse strand, and R/3p primer in forward primer
+# v21 - added ability to reserve nsa amplicons, 2018-05-04
 
 # Section of importing modules
 import os
@@ -29,7 +30,7 @@ from operator import itemgetter
 import hashlib
 import editdistance
 
-__version__ = '1.20.8'
+__version__ = '1.21.0'
 
 def makeHashes(seq,k):
     # k is the length of parts
@@ -182,10 +183,8 @@ def trimPrimers(data):
         primerNum=bestPrimer
     # Find primer at the 5'-end of R2 read
     if readsFileR2:
-        if primerNum % 2 == 0:
-            primerPairNum = primerNum + 1
-        else:
-            primerPairNum = primerNum - 1
+        # asign paired primer num to primerPairNum, because all primers are interleaved in primer file
+        primerPairNum = interleavedPrimerNum(primerNum)
         m3=regex.search(r'(?:'+primersR2_5[primerPairNum]+'){e<='+errNumber+'}',str(r2.seq[:maxPrimerLen+primerLocBuf]),flags=regex.BESTMATCH)
         if m3==None:
             # If user wants to identify hetero- and homodimers of primers
@@ -233,9 +232,10 @@ def trimPrimers(data):
                         return([[None,None],[r1,r2]],[],False)
                 else:
                     primerNum2=bestPrimer
-                # If we found two different, two primer must be paired correctly
-                if abs(primerNum - primerNum2) != 1 or max(primerNum, primerNum2) % 2 == 0:
-                    return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
+                if not rnsa:
+                    # If we found two different, two primer must be paired correctly
+                    if abs(primerNum - primerNum2) != 1 or max(primerNum, primerNum2) % 2 == 0:
+                        return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
             else:
                 # Save this pair of reads to untrimmed sequences
                 return([[None,None],[r1,r2]],[],False)
@@ -243,8 +243,9 @@ def trimPrimers(data):
             primerNum2=primerPairNum
     # Find primer at the 3'-end of R1 read
     # errNumber in 3p end
-    errNumberDescreased=int(int(errNumber)*minPrimer3Len/len(primersR1_3[interleavedPrimerNum(primerNum)][:-2]))
-    m2=regex.search(r'(?:'+primersR1_3[interleavedPrimerNum(primerNum)][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r1.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
+    errNumberDescreased=int(int(errNumber)*minPrimer3Len/len(primersR1_3[primerNum2][:-2]))
+    m2=regex.search(r'(?:'+primersR1_3[primerNum2][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r1.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
+
     if not primer3absent and m2==None:
         # Save this pair of reads to untrimmed sequences
         return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
@@ -268,21 +269,21 @@ def trimPrimers(data):
         else:
             resList[0][1]=r2[m3.span()[1]:]
         resList[0][1].description += " " + primersR2_5_names[primerNum2]
-    # discard reads length < 35 after primer-trimming
-    if len(resList[0][0].seq) < 35 or len(resList[0][1].seq) < 35:
+    # discard reads length < 20 after primer-trimming
+    if len(resList[0][0].seq) < 20 or len(resList[0][1].seq) < 20:
         return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
     # Save number of errors and primers sequences
     # [number of primer,difs1,difs2,difs3,difs4,]
     # Each dif is a set of (# of mismatches,# of insertions,# of deletions,primer_seq)
     if primersStatistics:
         difs1=countDifs(m1[0],primersR1_5[primerNum][1:-1])
-        if m2!=None: difs2=countDifs(m2[0],primersR1_3[interleavedPrimerNum(primerNum)][1:-1])
+        if m2!=None: difs2=countDifs(m2[0],primersR1_3[primerNum2][1:-1])
         else: difs2=(0,0,0,'')
         if readsFileR2: difs3=countDifs(m3[0],primersR2_5[primerNum2][1:-1])
         else: difs3=(0,0,0,'')
         if readsFileR2 and m4!=None: difs4=countDifs(m4[0],primersR2_3[primerNum][1:-1])
         else: difs4=(0,0,0,'')
-        return (resList,[primerNum,difs1,difs2,difs3,difs4],False)
+        return (resList,[[primerNum,primerNum2],difs1,difs2,difs3,difs4],False)
     else:
         return (resList,[],False)
     
@@ -303,6 +304,7 @@ if __name__ == "__main__":
     par.add_argument('--primer3-absent','-primer3',dest='primer3absent',action='store_true',help="if primer at the 3'-end may be absent, use this parameter")
     par.add_argument('--identify-dimers','-idimer',dest='idimer',type=str,help='use this parameter if you want to get statistics of homo- and heterodimer formation. Choose file to which statistics of primer-dimers will be written. This parameter may slightly decrease the speed of analysis')
     par.add_argument('--identify-nsa','-insa',dest='insa',type=str,help='use this parameter if you want to get statistics of primers non-specific amplification products. Choose file to which statistics will be written. This parameter may slightly decrease the speed of analysis')
+    par.add_argument('--nsa-reserve','-rnsa',dest='rnsa',action='store_true',help="if want to reserve non-specific amplcons, use this parameter")
     par.add_argument('--threads','-t',dest='threads',type=int,help='number of threads',default=2)
     par.add_argument('--version','-v',action='version',help='print version information',version="cutPrimers version " + __version__ +", https://github.com/ray1919/cutPrimers")
     args=par.parse_args()
@@ -317,6 +319,7 @@ if __name__ == "__main__":
     primersStatistics=args.primersStatistics
     idimer=args.idimer
     insa=args.insa
+    rnsa=args.rnsa
     try:
         if args.trimmedReadsR1[-3:]!='.gz':
             trimmedReadsR1=open(args.trimmedReadsR1,'w')
@@ -425,18 +428,19 @@ if __name__ == "__main__":
         print('ERROR! File not found:',primersFile)
         print('########')
         exit(0)
-    # chech edit distance between each primer, warn is distance is less than -err setting
-    i=1
-    for s in primersR1_5[:-1]:
-        for t in primersR1_5[i:]:
-            newed=editdistance.eval(s, t)
-            if newed <= int(errNumber):
-                print('########')
-                print('WARN! similar primers might cause confusion: ', s, '/', t)
-                print('--error-number was set to ', newed - 1 )
-                print('########')
-                errNumber=str(newed - 1)
-        i+=1
+    if not rnsa:
+        # chech edit distance between each primer, warn is distance is less than -err setting
+        i=1
+        for s in primersR1_5[:-1]:
+            for t in primersR1_5[i:]:
+                newed=editdistance.eval(s, t)
+                if newed <= int(errNumber):
+                    print('########')
+                    print('WARN! similar primers might cause confusion: ', s, '/', t)
+                    print('--error-number was set to ', newed - 1 )
+                    print('########')
+                    errNumber=str(newed - 1)
+            i+=1
     # primers in R2 on the 5'-end
     if readsFileR2:
         primersR2_5=primersR1_5
@@ -482,7 +486,7 @@ if __name__ == "__main__":
     else:
         data2=['']*int(allWork)
     # Create Queue for storing result and Pool for multiprocessing
-    primerErrorQ=[] 
+    primerErrorQ=[]
     p=Pool(threads,initializer,(maxPrimerLen,primerLocBuf,errNumber,primersR1_5,primersR1_3,primersR2_5,primersR2_3,
                                 primerR1_5_hashes,primerR1_5_hashLens,primerR2_5_hashes,primerR2_5_hashLens,
                                 readsFileR2,primersStatistics,idimer,primer3absent,minPrimer3Len))
@@ -492,7 +496,7 @@ if __name__ == "__main__":
     showPercWork(0,allWork)
     for res in p.imap_unordered(trimPrimers,zip(data1,data2),10):
         doneWork+=1
-        if doneWork & 100 == 0:
+        if doneWork & 500 == 0:
             showPercWork(doneWork,allWork)
         if primersStatistics and res[1]!=[]:
             primerErrorQ.append(res[1])
@@ -545,8 +549,10 @@ if __name__ == "__main__":
         primersErrorsType={}
         print('Counting errors...')
         for item in primerErrorQ:
+            itemkey = str(item[0][0]) + '+' + str(item[0][1])
+
             # If key for this primer has not been created, yet
-            if not item[0] in primersErrors.keys():
+            if not itemkey in primersErrors.keys():
                 # For each primer of each pair we will gather the following values:
                 # [(0)number of read pairs,
                 # (1)number of primers without errors,
@@ -554,22 +560,22 @@ if __name__ == "__main__":
                 # (3)number of primers with synthesis errors
                 # The first item of list - F
                 # The second - R
-                primersErrors[item[0]]=[[0,0,0,0],[0,0,0,0]]
-                
+                primersErrors[itemkey]=[[0,0,0,0],[0,0,0,0]]
+
 ##          R                           F_reverse_complement
 ## R1 5'---------________________________---------3'
 ## R2 5'---------________________________---------3'
 ##          F                           R_reverse_complement
-                
+
             # NOTICE: F is R2 5p primer
             # Increase number of read pairs
-            primersErrors[item[0]][0][0]+=1
-            primersErrors[item[0]][1][0]+=1
+            primersErrors[itemkey][0][0]+=1
+            primersErrors[itemkey][1][0]+=1
             # F-primers of pairs
             # The last variant is a case when we have single-end reads and 3' does not contain primer sequence
             # add to number of read pairs without errors
             if readsFileR2 and item[3][0:3]==(0,0,0):
-                primersErrors[item[0]][0][1]+=1
+                primersErrors[itemkey][0][1]+=1
             # If it was overlapping paired-end reads, we try to check if this is sequencing error
             elif item[2][3]!='' and item[3][3]!='':
                 # Rererse complement one of primer sequences
@@ -577,9 +583,9 @@ if __name__ == "__main__":
                 a=pairwise2.align.globalms(rev,item[3][3],2,-1,-1.53,-0.1)
                 # If found sequences are identical, it's a synthesis error
                 if list(a[0][0])==list(a[0][1]):
-                    primersErrors[item[0]][0][3]+=1
+                    primersErrors[itemkey][0][3]+=1
                     # Now we want to save information about error's location
-                    poses,muts=getErrors(primersR2_5[item[0]][1:-1],item[3][3])
+                    poses,muts=getErrors(primersR2_5[itemkey][1:-1],item[3][3])
                     for p in poses:
                         if p not in primersErrorsPos.keys():
                             primersErrorsPos[p]=1
@@ -592,14 +598,14 @@ if __name__ == "__main__":
                             primersErrorsType[m]+=1
                 # Else it's a sequencing error
                 else:
-                    primersErrors[item[0]][0][2]+=1
+                    primersErrors[itemkey][0][2]+=1
             # Else we just save it as sequencing error
             else:
-                primersErrors[item[0]][0][2]+=1
+                primersErrors[itemkey][0][2]+=1
             # R-primers of pairs
             # For R-primer we always have sequence at least at 5' end of R1
             if item[1][0:3]==(0,0,0):
-                primersErrors[item[0]][1][1]+=1
+                primersErrors[itemkey][1][1]+=1
             # If it was overlapping paired-end reads, we try to check if this is sequencing error
             elif item[4][3]!='' and item[1][3]!='':
                 # Rererse complement one of primer sequences
@@ -608,9 +614,9 @@ if __name__ == "__main__":
                 # If found sequences are identical, it's a synthesis error
                 try:
                     if list(a[0][0])==list(a[0][1]):
-                        primersErrors[item[0]][1][3]+=1
+                        primersErrors[itemkey][1][3]+=1
                         # Now we want to save information about error's location
-                        poses,muts=getErrors(primersR1_5[item[0]][1:-1],item[1][3])
+                        poses,muts=getErrors(primersR1_5[itemkey][1:-1],item[1][3])
                         for p in poses:
                             if p not in primersErrorsPos.keys():
                                 primersErrorsPos[p]=1
@@ -623,27 +629,27 @@ if __name__ == "__main__":
                                 primersErrorsType[m]+=1
                     # Else it's a sequencing error
                     else:
-                        primersErrors[item[0]][1][2]+=1
+                        primersErrors[itemkey][1][2]+=1
                 except IndexError:
                     print('IndexError!',a)
                     print(item)
                     exit(0)
             # Else we just save it as sequencing error
             else:
-                primersErrors[item[0]][0][2]+=1
-        primersStatistics.write('Primer\tTotal_number_of_reads\tNumber_without_any_errors\t'
-                                'Number_with_sequencing_errors\tNumber_with_synthesis_errors\n')
+                primersErrors[itemkey][0][2]+=1
+        #primersStatistics.write('Primer\tTotal_number_of_reads\tNumber_without_any_errors\t'
+        #                        'Number_with_sequencing_errors\tNumber_with_synthesis_errors\n')
+        primersStatistics.write('Primer_5p\tPrimer_3p\tTotal_number_of_reads_1\tNumber_without_any_errors_1\t'
+                                'Number_with_sequencing_errors_1\tNumber_with_synthesis_errors_1\t'
+                                'Total_number_of_reads_2\tNumber_without_any_errors_2\t'
+                                'Number_with_sequencing_errors_2\tNumber_with_synthesis_errors_2\n')
         for key,item in primersErrors.items():
+
             item[0]=list(map(str,item[0]))
             item[1]=list(map(str,item[1]))
-            # R1 5p
-            primersStatistics.write(primersR1_5_names[key]+'\t'+'\t'.join(item[1])+'\n')
-            # R2 5p
-            if key % 2 == 0:
-                key2 = key + 1
-            else:
-                key2 = key - 1
-            primersStatistics.write(primersR1_5_names[key2]+'\t'+'\t'.join(item[0])+'\n')
+
+            (key1,key2) = key.split('+', 2)
+            primersStatistics.write(primersR1_5_names[int(key1)]+'\t'+primersR1_5_names[int(key2)]+'\t'+'\t'.join(item[1])+'\t'+'\t'.join(item[0])+'\n')
         primersStatistics.close()
 
         primersStatisticsPos.write('Position_in_primer\tNumber_of_mutations\n')
