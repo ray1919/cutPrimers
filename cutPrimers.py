@@ -125,6 +125,12 @@ def getErrors(s1,s2):
 def interleavedPrimerNum(x):
     return 1 - (x % 2) + int(x/2)*2
 
+def hamming2(s1, s2):
+    """Calculate the Hamming distance between two bit strings"""
+    if len(s1) != len(s2):
+        return -1
+    return sum(c1 != c2 for c1, c2 in zip(s1, s2))
+
 def trimPrimers(data):
     # This function get two records from both read files (R1 and R2)
     # and trim them
@@ -136,6 +142,9 @@ def trimPrimers(data):
     # skip short reads less than 30bp
 #   if len(r1) < maxPrimerLen+primerLocBuf or len(r2) < maxPrimerLen+primerLocBuf:
 #       return([[None,None],[r1,r2]],[],False)
+    # check r1 & r2 is paired
+    if hamming2(r1.description, r2.description) != 1:
+        return([[None,None],[None,None]],[],False)
     # Find primer at the 5'-end of R1 read
     readHashes=set()
     for l in primerR1_5_hashLens:
@@ -329,7 +338,7 @@ if __name__ == "__main__":
         print('########')
         print('ERROR! Could not create file:',args.trimmedReadsR1)
         print('########')
-        exit(0)
+        exit(1)
     if args.trimmedReadsR2:
         try:
             if args.trimmedReadsR2[-3:]!='.gz':
@@ -340,7 +349,7 @@ if __name__ == "__main__":
             print('########')
             print('ERROR! Could not create file:',args.trimmedReadsR2)
             print('########')
-            exit(0)
+            exit(1)
         if args.untrimmedReadsR1==args.trimmedReadsR1:
             untrimmedReadsR1=trimmedReadsR1
         else:
@@ -353,7 +362,7 @@ if __name__ == "__main__":
                 print('########')
                 print('ERROR! Could not create file:',args.untrimmedReadsR1)
                 print('########')
-                exit(0)
+                exit(1)
     if args.untrimmedReadsR2:
         if args.untrimmedReadsR2==args.trimmedReadsR2:
             untrimmedReadsR2=trimmedReadsR2
@@ -367,7 +376,7 @@ if __name__ == "__main__":
                 print('########')
                 print('ERROR! Could not create file:',args.untrimmedReadsR2)
                 print('########')
-                exit(0)
+                exit(1)
     if (idimer or insa) and not readsFileR2:
 #   if idimer and not readsFileR2:
         print('Warning! You did not provide R2-file so parameter "-idimer/insa" will be ignored')
@@ -380,7 +389,7 @@ if __name__ == "__main__":
             print('########')
             print('ERROR! Could not create file:',idimer)
             print('########')
-            exit(0)
+            exit(1)
         primerDimers={}
     if insa:
         try:
@@ -389,7 +398,7 @@ if __name__ == "__main__":
             print('########')
             print('ERROR! Could not create file:',insa)
             print('########')
-            exit(0)
+            exit(1)
         primerNSAs={}
     if primersStatistics:
         primersStatistics=open(args.primersStatistics,'w')
@@ -427,7 +436,7 @@ if __name__ == "__main__":
         print('########')
         print('ERROR! File not found:',primersFile)
         print('########')
-        exit(0)
+        exit(2)
     if not rnsa:
         # chech edit distance between each primer, warn is distance is less than -err setting
         i=1
@@ -466,7 +475,7 @@ if __name__ == "__main__":
         print('########')
         print('ERROR! Could not open file:',readsFileR1)
         print('########')
-        exit(0)
+        exit(2)
     print('Reading input FASTQ-file(s)...')
     if readsFileR1[-3:]!='.gz':
         data1=SeqIO.parse(readsFileR1,'fastq')
@@ -482,7 +491,7 @@ if __name__ == "__main__":
             print('########')
             print('ERROR! Could not open file:',readsFileR2)
             print('########')
-            exit(0)
+            exit(2)
     else:
         data2=['']*int(allWork)
     # Create Queue for storing result and Pool for multiprocessing
@@ -527,17 +536,17 @@ if __name__ == "__main__":
                 SeqIO.write(res[0][1][1],untrimmedReadsR2,'fastq')
             else:
                 print('ERROR: nor the 1st item of function result list or 2nd contains anything')
-                print(res)
-                exit(0)
+                print('       This might caused by mismatch of read1/read2 names.')
+                exit(3)
         else:
             if res[0][0][0] is not None:
                 SeqIO.write(res[0][0][0],trimmedReadsR1,'fastq')
             elif res[0][1][0] is not None:
                 SeqIO.write(res[0][1][0],untrimmedReadsR1,'fastq')
             else:
-                print('ERROR: item of function result list contains anything')
+                print('ERROR: item of function result list contains nothing')
                 print(res)
-                exit(0)
+                exit(3)
     print()
     # primersErrors is a dictionary that contains errors in primers
     if args.primersStatistics:
@@ -633,7 +642,7 @@ if __name__ == "__main__":
                 except IndexError:
                     print('IndexError!',a)
                     print(item)
-                    exit(0)
+                    exit(4)
             # Else we just save it as sequencing error
             else:
                 primersErrors[itemkey][0][2]+=1
