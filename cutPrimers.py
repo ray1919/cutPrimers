@@ -12,6 +12,7 @@
 #     - fix bug that some dimers might be also detected as non-specfic amplicons
 # v20 - added ability to cutprimer with reverse strand pairs of primers, F/5p primer in reverse strand, and R/3p primer in forward primer
 # v21 - added ability to reserve nsa amplicons, 2018-05-04
+# v22 - fix bug in determing 3' primer matching, 2018-6-2
 
 # Section of importing modules
 import os
@@ -30,7 +31,7 @@ from operator import itemgetter
 import hashlib
 import editdistance
 
-__version__ = '1.21.0'
+__version__ = '1.22.0'
 
 def makeHashes(seq,k):
     # k is the length of parts
@@ -254,9 +255,34 @@ def trimPrimers(data):
     # errNumber in 3p end
     errNumberDescreased=int(int(errNumber)*minPrimer3Len/len(primersR1_3[primerNum2][:-2]))
     m2=regex.search(r'(?:'+primersR1_3[primerNum2][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r1.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
+    if m2!=None:
+        lenR1_3primer=maxPrimerLen+primerLocBuf-m2.span()[0]
+        if lenR1_3primer > len(primersR1_3[primerNum2]) - 2:
+            m2=None
+        else:
+            hd2=hamming2(r1.seq[-lenR1_3primer:],primersR1_3[primerNum2][1:1+lenR1_3primer])
+            errNumberDescreased2=int(int(errNumber)*lenR1_3primer/len(primersR1_3[primerNum2][:-2]))
+            if hd2 > int(errNumberDescreased2):
+                m2=None
     if not primer3absent and m2==None:
         # Save this pair of reads to untrimmed sequences
         return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
+    # Find primer at the 3'-end of R2 read
+    if readsFileR2:
+        errNumberDescreased=int(round(int(errNumber)*minPrimer3Len/len(primersR2_3[primerNum][:-2])))
+        m4=regex.search(r'(?:'+primersR2_3[primerNum][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r2.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
+        if m4!=None:
+            lenR2_3primer=maxPrimerLen+primerLocBuf-m4.span()[0]
+            if lenR2_3primer > len(primersR2_3[primerNum]) - 2:
+                m4=None
+            else:
+                hd4=hamming2(r2.seq[-lenR2_3primer:],primersR2_3[primerNum][1:1+lenR2_3primer])
+                errNumberDescreased4=int(int(errNumber)*lenR2_3primer/len(primersR2_3[primerNum][:-2]))
+                if hd4 > int(errNumberDescreased4):
+                    m4=None
+        if not primer3absent and m4==None:
+            # Save this pair of reads to untrimmed sequences
+            return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
     # If all primers were found
     # Trim sequences of primers and write them to result file
     if m2!=None:
@@ -264,17 +290,11 @@ def trimPrimers(data):
     else:
         resList[0][0]=r1[m1.span()[1]:]
     resList[0][0].description += " " + primersR1_5_names[primerNum]
-    # Find primer at the 3'-end of R2 read
     if readsFileR2:
-        errNumberDescreased=int(round(int(errNumber)*minPrimer3Len/len(primersR2_3[primerNum][:-2])))
-        m4=regex.search(r'(?:'+primersR2_3[primerNum][:minPrimer3Len]+')){e<='+str(errNumberDescreased)+'}',str(r2.seq[-maxPrimerLen-primerLocBuf:]),flags=regex.BESTMATCH)
         if m4!=None:
             resList[0][1]=r2[m3.span()[1]:len(r2.seq)-maxPrimerLen-primerLocBuf+m4.span()[0]]
         else:
             resList[0][1]=r2[m3.span()[1]:]
-        if not primer3absent and m4==None:
-            # Save this pair of reads to untrimmed sequences
-            return([[None,None],[r1,r2]],[],[primerNum,primerNum2])
         resList[0][1].description += " " + primersR2_5_names[primerNum2]
     # discard reads length < 20 after primer-trimming
     if len(resList[0][0].seq) < 20 or len(resList[0][1].seq) < 20:
@@ -293,8 +313,8 @@ def trimPrimers(data):
         return (resList,[[primerNum,primerNum2],difs1,difs2,difs3,difs4],False)
     else:
         return (resList,[],False)
-
-if __name__ == "__main__":
+    
+if __name__ == "__main__":    
     # Section of reading arguments
     par=argparse.ArgumentParser(description='This script cuts primers from reads sequences')
     par.add_argument('--readsFile_r1','-r1',dest='readsFile1',type=str,help='file with R1 reads of one sample',required=True)
@@ -306,8 +326,8 @@ if __name__ == "__main__":
     par.add_argument('--untrimmedReadsR2','-utr2',dest='untrimmedReadsR2',type=str,help='name of file for untrimmed R2 reads. If you want to write reads that has not been trimmed to the same file as trimmed reads, type the same name',required=False)
     par.add_argument('--primersStatistics','-stat',dest='primersStatistics',type=str,help='name of file for statistics of errors in primers. This works only for paired-end reads with primers at 3\'- and 5\'-ends',required=False)
     par.add_argument('--error-number','-err',dest='errNumber',type=int,help='number of errors (substitutions, insertions, deletions) that allowed during searching primer sequence in a read sequence. Default: 5',default=5)
-    par.add_argument('--primer-location-buffer','-plb',dest='primerLocBuf',type=int,help='Buffer of primer location in the read from the end. Default: 0',default=0)
-    par.add_argument('--min-primer3-length','-primer3len',dest='minPrimer3Len',type=int,help="Minimal length of primer on the 3'-end to trim. Use this parameter, if you are ready to trim only part of primer sequence of the 3'-end of read",default=16)
+    par.add_argument('--primer-location-buffer','-plb',dest='primerLocBuf',type=int,help='Buffer of primer location in the read from the end. Default: 10',default=10)
+    par.add_argument('--min-primer3-length','-primer3len',dest='minPrimer3Len',type=int,help="Minimal length of primer on the 3'-end to trim. Use this parameter, if you are ready to trim only part of primer sequence of the 3'-end of read",default=6)
     par.add_argument('--primer3-absent','-primer3',dest='primer3absent',action='store_true',help="if primer at the 3'-end may be absent, use this parameter")
     par.add_argument('--identify-dimers','-idimer',dest='idimer',type=str,help='use this parameter if you want to get statistics of homo- and heterodimer formation. Choose file to which statistics of primer-dimers will be written. This parameter may slightly decrease the speed of analysis')
     par.add_argument('--identify-nsa','-insa',dest='insa',type=str,help='use this parameter if you want to get statistics of primers non-specific amplification products. Choose file to which statistics will be written. This parameter may slightly decrease the speed of analysis')
@@ -320,7 +340,7 @@ if __name__ == "__main__":
     readsFileR2=args.readsFile2
     primersFile=args.primersFile
     primer3absent=args.primer3absent
-    minPrimer3Len=args.minPrimer3Len
+    minPrimer3Len=args.minPrimer3Len+1
     errNumber=str(args.errNumber)
     primerLocBuf=args.primerLocBuf
     primersStatistics=args.primersStatistics
@@ -592,7 +612,7 @@ if __name__ == "__main__":
                 if list(a[0][0])==list(a[0][1]):
                     primersErrors[itemkey][0][3]+=1
                     # Now we want to save information about error's location
-                    poses,muts=getErrors(primersR2_5[itemkey][1:-1],item[3][3])
+                    poses,muts=getErrors(primersR2_5[item[0][0]][1:-1],item[3][3])
                     for p in poses:
                         if p not in primersErrorsPos.keys():
                             primersErrorsPos[p]=1
@@ -623,7 +643,7 @@ if __name__ == "__main__":
                     if list(a[0][0])==list(a[0][1]):
                         primersErrors[itemkey][1][3]+=1
                         # Now we want to save information about error's location
-                        poses,muts=getErrors(primersR1_5[itemkey][1:-1],item[1][3])
+                        poses,muts=getErrors(primersR1_5[item[0][0]][1:-1],item[1][3])
                         for p in poses:
                             if p not in primersErrorsPos.keys():
                                 primersErrorsPos[p]=1
